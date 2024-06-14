@@ -1,0 +1,91 @@
+type Activity = record {
+  id : text;
+  date : text;
+  description : text;
+  created_at : text;
+  plot_id : text;
+};
+type ActivityPayload = record {
+  date : text;
+  description : text;
+  plot_id : text;
+};
+type Event = record {
+  id : text;
+  title : text;
+  date : text;
+  description : text;
+  created_at : text;
+  location : text;
+};
+type EventPayload = record {
+  title : text;
+  date : text;
+  description : text;
+  location : text;
+};
+type Message = variant {
+  Error : text;
+  InvalidPayload : text;
+  NotFound : text;
+  Success : text;
+};
+type Plot = record {
+  id : text;
+  size : text;
+  created_at : text;
+  user_id : text;
+  location : text;
+  reserved_until : text;
+};
+type PlotPayload = record {
+  size : text;
+  user_id : text;
+  location : text;
+  reserved_until : text;
+};
+type Resource = record {
+  id : text;
+  name : text;
+  created_at : text;
+  available : bool;
+  quantity : nat64;
+};
+type ResourcePayload = record {
+  name : text;
+  available : bool;
+  quantity : nat64;
+};
+type Result = variant { Ok : Activity; Err : Message };
+type Result_1 = variant { Ok : Event; Err : Message };
+type Result_2 = variant { Ok : Plot; Err : Message };
+type Result_3 = variant { Ok : Resource; Err : Message };
+type Result_4 = variant { Ok : User; Err : Message };
+type Result_5 = variant { Ok : vec Activity; Err : Message };
+type Result_6 = variant { Ok : vec Event; Err : Message };
+type Result_7 = variant { Ok : vec Plot; Err : Message };
+type Result_8 = variant { Ok : vec Resource; Err : Message };
+type Result_9 = variant { Ok : vec User; Err : Message };
+type User = record {
+  owner : text;
+  name : text;
+  created_at : text;
+  user_id : text;
+  email : text;
+  phone_number : text;
+};
+type UserPayload = record { name : text; email : text; phone_number : text };
+service : {
+  create_activity : (ActivityPayload) -> (Result);
+  create_event : (EventPayload) -> (Result_1);
+  create_plot : (PlotPayload) -> (Result_2);
+  create_resource : (ResourcePayload) -> (Result_3);
+  create_user_profile : (UserPayload) -> (Result_4);
+  get_all_activities : () -> (Result_5) query;
+  get_all_events : () -> (Result_6) query;
+  get_all_plots : () -> (Result_7) query;
+  get_all_resources : () -> (Result_8) query;
+  get_all_users : () -> (Result_9) query;
+  get_user_profile : (text) -> (Result_4) query;
+  update_user_profile : (text, UserPayload) -> (Result_4);
+}
