@@ -1,556 +1,438 @@
-#[macro_use]
-extern crate serde;
-use candid::{Decode, Encode};
-use ic_cdk::api::time;
-use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
-use ic_stable_structures::{BoundedStorable, Cell, DefaultMemoryImpl, StableBTreeMap, Storable};
-use regex::Regex;
-use std::{borrow::Cow, cell::RefCell};
+use candid::{CandidType, Deserialize};
+use ic_cdk::export::candid::Principal;
+use ic_cdk_macros::*;
+use serde::Serialize;
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-type Memory = VirtualMemory<DefaultMemoryImpl>;
-type IdCell = Cell<u64, Memory>;
+// Define a global mutex for thread safety
+lazy_static::lazy_static! {
+    static ref USERS_STORAGE: Mutex<HashMap<String, User>> = Mutex::new(HashMap::new());
+    static ref PLOTS_STORAGE: Mutex<HashMap<String, Plot>> = Mutex::new(HashMap::new());
+    static ref ACTIVITIES_STORAGE: Mutex<HashMap<String, Activity>> = Mutex::new(HashMap::new());
+    static ref RESOURCES_STORAGE: Mutex<HashMap<String, Resource>> = Mutex::new(HashMap::new());
+    static ref EVENTS_STORAGE: Mutex<HashMap<String, Event>> = Mutex::new(HashMap::new());
+    static ref ID_COUNTER: Mutex<u64> = Mutex::new(0);
+}
 
-#[derive(candid::CandidType, Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, CandidType, Deserialize, Serialize)]
 struct User {
     user_id: String,
-    owner: String,
-    name: String,
     email: String,
     phone_number: String,
-    created_at: String,
+    role: Role,
 }
 
-#[derive(candid::CandidType, Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, CandidType, Deserialize, Serialize)]
 struct Plot {
-    id: String,
-    user_id: String,
-    size: String,
-    location: String,
-    reserved_until: String,
-    created_at: String,
+    plot_id: String,
+    owner_id: String,
+    size: u32,
 }
 
-#[derive(candid::CandidType, Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, CandidType, Deserialize, Serialize)]
 struct Activity {
-    id: String,
+    activity_id: String,
     plot_id: String,
     description: String,
-    date: String,
-    created_at: String,
+    timestamp: String,
 }
 
-#[derive(candid::CandidType, Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, CandidType, Deserialize, Serialize)]
 struct Resource {
-    id: String,
+    resource_id: String,
     name: String,
-    quantity: u64,
-    available: bool,
-    created_at: String,
+    quantity: u32,
 }
 
-#[derive(candid::CandidType, Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, CandidType, Deserialize, Serialize)]
 struct Event {
-    id: String,
-    title: String,
-    description: String,
-    date: String,
-    location: String,
-    created_at: String,
-}
-
-impl Storable for User {
-    fn to_bytes(&self) -> Cow<[u8]> {
-        Cow::Owned(Encode!(self).unwrap())
-    }
-
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        Decode!(bytes.as_ref(), Self).unwrap()
-    }
-}
-
-impl BoundedStorable for User {
-    const MAX_SIZE: u32 = 512;
-    const IS_FIXED_SIZE: bool = false;
-}
-
-impl Storable for Plot {
-    fn to_bytes(&self) -> Cow<[u8]> {
-        Cow::Owned(Encode!(self).unwrap())
-    }
-
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        Decode!(bytes.as_ref(), Self).unwrap()
-    }
-}
-
-impl BoundedStorable for Plot {
-    const MAX_SIZE: u32 = 512;
-    const IS_FIXED_SIZE: bool = false;
-}
-
-impl Storable for Activity {
-    fn to_bytes(&self) -> Cow<[u8]> {
-        Cow::Owned(Encode!(self).unwrap())
-    }
-
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        Decode!(bytes.as_ref(), Self).unwrap()
-    }
-}
-
-impl BoundedStorable for Activity {
-    const MAX_SIZE: u32 = 512;
-    const IS_FIXED_SIZE: bool = false;
-}
-
-impl Storable for Resource {
-    fn to_bytes(&self) -> Cow<[u8]> {
-        Cow::Owned(Encode!(self).unwrap())
-    }
-
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        Decode!(bytes.as_ref(), Self).unwrap()
-    }
-}
-
-impl BoundedStorable for Resource {
-    const MAX_SIZE: u32 = 512;
-    const IS_FIXED_SIZE: bool = false;
-}
-
-impl Storable for Event {
-    fn to_bytes(&self) -> Cow<[u8]> {
-        Cow::Owned(Encode!(self).unwrap())
-    }
-
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        Decode!(bytes.as_ref(), Self).unwrap()
-    }
-}
-
-impl BoundedStorable for Event {
-    const MAX_SIZE: u32 = 512;
-    const IS_FIXED_SIZE: bool = false;
-}
-
-thread_local! {
-    static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> = RefCell::new(
-        MemoryManager::init(DefaultMemoryImpl::default())
-    );
-
-    static ID_COUNTER: RefCell<IdCell> = RefCell::new(
-        IdCell::init(MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(0))), 0)
-            .expect("Cannot create a counter")
-    );
-
-    static USERS_STORAGE: RefCell<StableBTreeMap<u64, User, Memory>> =
-        RefCell::new(StableBTreeMap::init(
-            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(1)))
-    ));
-
-    static PLOTS_STORAGE: RefCell<StableBTreeMap<u64, Plot, Memory>> =
-        RefCell::new(StableBTreeMap::init(
-            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(2)))
-    ));
-
-    static ACTIVITIES_STORAGE: RefCell<StableBTreeMap<u64, Activity, Memory>> =
-        RefCell::new(StableBTreeMap::init(
-            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(3)))
-    ));
-
-    static RESOURCES_STORAGE: RefCell<StableBTreeMap<u64, Resource, Memory>> =
-        RefCell::new(StableBTreeMap::init(
-            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(4)))
-    ));
-
-    static EVENTS_STORAGE: RefCell<StableBTreeMap<u64, Event, Memory>> =
-        RefCell::new(StableBTreeMap::init(
-            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(5)))
-    ));
-}
-
-#[derive(candid::CandidType, Deserialize, Serialize)]
-struct UserPayload {
+    event_id: String,
     name: String,
-    email: String,
-    phone_number: String,
-}
-
-#[derive(candid::CandidType, Deserialize, Serialize)]
-struct PlotPayload {
-    user_id: String,
-    size: String,
-    location: String,
-    reserved_until: String,
-}
-
-#[derive(candid::CandidType, Deserialize, Serialize)]
-struct ActivityPayload {
-    plot_id: String,
-    description: String,
-    date: String,
-}
-
-#[derive(candid::CandidType, Deserialize, Serialize)]
-struct ResourcePayload {
-    name: String,
-    quantity: u64,
-    available: bool,
-}
-
-#[derive(candid::CandidType, Deserialize, Serialize)]
-struct EventPayload {
-    title: String,
-    description: String,
     date: String,
     location: String,
 }
 
-#[derive(candid::CandidType, Deserialize, Serialize)]
-enum Message {
-    Success(String),
-    Error(String),
+#[derive(Clone, Debug, CandidType, Deserialize, PartialEq)]
+enum Role {
+    Admin,
+    User,
+}
+
+#[derive(Debug, CandidType, Deserialize, PartialEq)]
+enum Error {
     NotFound(String),
     InvalidPayload(String),
+    Unauthorized(String),
+    InternalError(String),
 }
 
-// Function to create a new user profile
+#[derive(Debug, CandidType, Deserialize)]
+enum Message {
+    Success,
+    Error(Error),
+}
+
+// Function to get the current timestamp
+fn current_timestamp() -> String {
+    let start = SystemTime::now();
+    let since_the_epoch = start.duration_since(UNIX_EPOCH).expect("Time went backwards");
+    format!("{}", since_the_epoch.as_secs())
+}
+
+// Function to validate email
+fn validate_email(email: &str) -> bool {
+    let email_regex = regex::Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap();
+    email_regex.is_match(email)
+}
+
+// Function to validate phone number
+fn validate_phone_number(phone_number: &str) -> bool {
+    let phone_regex = regex::Regex::new(r"^\+?[1-9]\d{1,14}$").unwrap();
+    phone_regex.is_match(phone_number)
+}
+
+// Function to check if a user is an admin
+fn is_admin(user_id: &str) -> bool {
+    let storage = USERS_STORAGE.lock().unwrap();
+    storage.iter().any(|(_, user)| user.user_id == user_id && user.role == Role::Admin)
+}
+
+// Function to get a new unique ID
+fn get_new_id() -> u64 {
+    let mut counter = ID_COUNTER.lock().unwrap();
+    *counter += 1;
+    *counter
+}
+
+// Function to create a new user
 #[ic_cdk::update]
-fn create_user_profile(payload: UserPayload) -> Result<User, Message> {
-    if payload.name.is_empty() || payload.email.is_empty() || payload.phone_number.is_empty() {
-        return Err(Message::InvalidPayload(
-            "Ensure 'name', 'email', and 'phone_number' are provided.".to_string(),
-        ));
+fn create_user(user_id: String, email: String, phone_number: String, role: Role) -> Result<Message, Message> {
+    if !validate_email(&email) {
+        return Err(Message::Error(Error::InvalidPayload("Invalid email format".to_string())));
     }
-    
-    // Validate email
-    let email_regex = Regex::new(r"^[^\s@]+@[^\s@]+\.[^\s@]+$").unwrap();
-    if !email_regex.is_match(&payload.email) {
-        return Err(Message::InvalidPayload(
-            "Invalid email format: Ensure the email is in the correct format.".to_string(),
-        ));
+    if !validate_phone_number(&phone_number) {
+        return Err(Message::Error(Error::InvalidPayload("Invalid phone number format".to_string())));
     }
-
-    // Validate the email address to make it unique
-    let email = payload.email.clone();
-    let email_exists = USERS_STORAGE.with(|storage| {
-        storage.borrow().iter().any(|(_, user)| user.email == email)
-    });
-    if email_exists {
-        return Err(Message::InvalidPayload(
-            "Email already exists: Ensure the email address is unique.".to_string(),
-        ));
-    }
-    
-    // Validate phone number
-    let phone_number_regex = Regex::new(r"^\d{10}$").unwrap();
-    if !phone_number_regex.is_match(&payload.phone_number) {
-        return Err(Message::InvalidPayload(
-            "Invalid phone number: Ensure the phone number is in the correct format.".to_string(),
-        ));
-    }
-
-    let id = ID_COUNTER
-        .with(|counter| {
-            let current_value = *counter.borrow().get();
-            counter.borrow_mut().set(current_value + 1)
-        })
-        .expect("Cannot increment ID counter");
-
     let user = User {
-        user_id: id.to_string(),
-        owner: ic_cdk::caller().to_string(),
-        name: payload.name,
-        email: payload.email,
-        phone_number: payload.phone_number,
-        created_at: time().to_string(),
+        user_id: user_id.clone(),
+        email,
+        phone_number,
+        role,
     };
-
-    USERS_STORAGE.with(|storage| storage.borrow_mut().insert(id, user.clone()));
-
-    Ok(user)
-}
-
-// Function to update a user profile
-#[ic_cdk::update]
-fn update_user_profile(user_id: String, payload: UserPayload) -> Result<User, Message> {
-    if payload.name.is_empty() || payload.email.is_empty() || payload.phone_number.is_empty() {
-        return Err(Message::InvalidPayload(
-            "Ensure 'name', 'email', and 'phone_number' are provided.".to_string(),
-        ));
-    }
-
-    // Validate email
-    let email_regex = Regex::new(r"^[^\s@]+@[^\s@]+\.[^\s@]+$").unwrap();
-    if !email_regex.is_match(&payload.email) {
-        return Err(Message::InvalidPayload(
-            "Invalid email format: Ensure the email is in the correct format.".to_string(),
-        ));
-    }
-
-    // Validate the email address to make it unique
-    let email = payload.email.clone();
-    let email_exists = USERS_STORAGE.with(|storage| {
-        storage.borrow().iter().any(|(_, user)| user.email == email)
-    });
-    if email_exists {
-        return Err(Message::InvalidPayload(
-            "Email already exists: Ensure the email address is unique.".to_string(),
-        ));
-    }
-
-    // Validate phone number
-    let phone_number_regex = Regex::new(r"^\d{10}$").unwrap();
-    if !phone_number_regex.is_match(&payload.phone_number) {
-        return Err(Message::InvalidPayload(
-            "Invalid phone number: Ensure the phone number is in the correct format.".to_string(),
-        ));
-    }
-
-    let user = USERS_STORAGE.with(|storage| {
-        let user = storage.borrow().iter().find(|(_, user)| user.user_id == user_id);
-        match user {
-            Some((id, _)) => {
-                let updated_user = User {
-                    user_id: user_id,
-                    owner: ic_cdk::caller().to_string(),
-                    name: payload.name,
-                    email: payload.email,
-                    phone_number: payload.phone_number,
-                    created_at: time().to_string(),
-                };
-                storage.borrow_mut().insert(id, updated_user.clone());
-                Ok(updated_user)
-            }
-            None => Err(Message::NotFound("User not found.".to_string())),
-        }
-    });
-
-    user
-}
-
-// Function to get a user profile id
-#[ic_cdk::query]
-fn get_user_profile(user_id: String) -> Result<User, Message> {
-    USERS_STORAGE.with(|storage| {
-        let user = storage.borrow().iter().find(|(_, user)| user.user_id == user_id);
-        match user {
-            Some((_, record)) => Ok(record.clone()),
-            None => Err(Message::NotFound("User not found.".to_string())),
-        }
-    })
+    let mut storage = USERS_STORAGE.lock().unwrap();
+    storage.insert(user_id, user);
+    Ok(Message::Success)
 }
 
 // Function to get all users
 #[ic_cdk::query]
-fn get_all_users() -> Result<Vec<User>, Message> {
-    USERS_STORAGE.with(|storage| {
-        let records: Vec<User> = storage.borrow().iter().map(|(_, record)| record.clone()).collect();
-        if records.is_empty() {
-            Err(Message::NotFound("No users found.".to_string()))
-        } else {
-            Ok(records)
+fn get_all_users() -> Vec<User> {
+    let storage = USERS_STORAGE.lock().unwrap();
+    storage.values().cloned().collect()
+}
+
+// Function to update a user
+#[ic_cdk::update]
+fn update_user(user_id: String, email: Option<String>, phone_number: Option<String>, role: Option<Role>, requester_id: String) -> Result<Message, Message> {
+    if !is_admin(&requester_id) {
+        return Err(Message::Error(Error::Unauthorized("Only admins can update users.".to_string())));
+    }
+    let mut storage = USERS_STORAGE.lock().unwrap();
+    let user = storage.get_mut(&user_id);
+    if let Some(user) = user {
+        if let Some(email) = email {
+            if !validate_email(&email) {
+                return Err(Message::Error(Error::InvalidPayload("Invalid email format".to_string())));
+            }
+            user.email = email;
         }
-    })
+        if let Some(phone_number) = phone_number {
+            if !validate_phone_number(&phone_number) {
+                return Err(Message::Error(Error::InvalidPayload("Invalid phone number format".to_string())));
+            }
+            user.phone_number = phone_number;
+        }
+        if let Some(role) = role {
+            user.role = role;
+        }
+        Ok(Message::Success)
+    } else {
+        Err(Message::Error(Error::NotFound("User not found".to_string())))
+    }
+}
+
+// Function to delete a user
+#[ic_cdk::update]
+fn delete_user(user_id: String, requester_id: String) -> Result<Message, Message> {
+    if !is_admin(&requester_id) {
+        return Err(Message::Error(Error::Unauthorized("Only admins can delete users.".to_string())));
+    }
+    let mut storage = USERS_STORAGE.lock().unwrap();
+    if storage.remove(&user_id).is_some() {
+        Ok(Message::Success)
+    } else {
+        Err(Message::Error(Error::NotFound("User not found".to_string())))
+    }
 }
 
 // Function to create a new plot
 #[ic_cdk::update]
-fn create_plot(payload: PlotPayload) -> Result<Plot, Message> {
-    if payload.user_id.is_empty() || payload.size.is_empty() || payload.location.is_empty() {
-        return Err(Message::InvalidPayload(
-            "Ensure 'user_id', 'size', and 'location' are provided.".to_string(),
-        ));
-    }
-
-    // Validate the user ID
-    let user_id = payload.user_id.clone();
-    let user_exists = USERS_STORAGE.with(|storage| {
-        storage.borrow().iter().any(|(_, user)| user.user_id == user_id)
-    });
-    if !user_exists {
-        return Err(Message::InvalidPayload(
-            "User not found: Ensure the user ID is correct.".to_string(),
-        ));
-    }
-
-    let id = ID_COUNTER
-        .with(|counter| {
-            let current_value = *counter.borrow().get();
-            counter.borrow_mut().set(current_value + 1)
-        })
-        .expect("Cannot increment ID counter");
-
+fn create_plot(owner_id: String, size: u32) -> Result<Message, Message> {
     let plot = Plot {
-        id: id.to_string(),
-        user_id: payload.user_id,
-        size: payload.size,
-        location: payload.location,
-        reserved_until: payload.reserved_until,
-        created_at: time().to_string(),
+        plot_id: get_new_id().to_string(),
+        owner_id,
+        size,
     };
-
-    PLOTS_STORAGE.with(|storage| storage.borrow_mut().insert(id, plot.clone()));
-
-    Ok(plot)
+    let mut storage = PLOTS_STORAGE.lock().unwrap();
+    storage.insert(plot.plot_id.clone(), plot);
+    Ok(Message::Success)
 }
 
 // Function to get all plots
 #[ic_cdk::query]
-fn get_all_plots() -> Result<Vec<Plot>, Message> {
-    PLOTS_STORAGE.with(|storage| {
-        let records: Vec<Plot> = storage.borrow().iter().map(|(_, record)| record.clone()).collect();
-        if records.is_empty() {
-            Err(Message::NotFound("No plots found.".to_string()))
-        } else {
-            Ok(records)
+fn get_all_plots() -> Vec<Plot> {
+    let storage = PLOTS_STORAGE.lock().unwrap();
+    storage.values().cloned().collect()
+}
+
+// Function to update a plot
+#[ic_cdk::update]
+fn update_plot(plot_id: String, owner_id: Option<String>, size: Option<u32>, requester_id: String) -> Result<Message, Message> {
+    if !is_admin(&requester_id) {
+        return Err(Message::Error(Error::Unauthorized("Only admins can update plots.".to_string())));
+    }
+    let mut storage = PLOTS_STORAGE.lock().unwrap();
+    let plot = storage.get_mut(&plot_id);
+    if let Some(plot) = plot {
+        if let Some(owner_id) = owner_id {
+            plot.owner_id = owner_id;
         }
-    })
+        if let Some(size) = size {
+            plot.size = size;
+        }
+        Ok(Message::Success)
+    } else {
+        Err(Message::Error(Error::NotFound("Plot not found".to_string())))
+    }
+}
+
+// Function to delete a plot
+#[ic_cdk::update]
+fn delete_plot(plot_id: String, requester_id: String) -> Result<Message, Message> {
+    if !is_admin(&requester_id) {
+        return Err(Message::Error(Error::Unauthorized("Only admins can delete plots.".to_string())));
+    }
+    let mut storage = PLOTS_STORAGE.lock().unwrap();
+    if storage.remove(&plot_id).is_some() {
+        Ok(Message::Success)
+    } else {
+        Err(Message::Error(Error::NotFound("Plot not found".to_string())))
+    }
 }
 
 // Function to create a new activity
 #[ic_cdk::update]
-fn create_activity(payload: ActivityPayload) -> Result<Activity, Message> {
-    if payload.plot_id.is_empty() || payload.description.is_empty() || payload.date.is_empty() {
-        return Err(Message::InvalidPayload(
-            "Ensure 'plot_id', 'description', and 'date' are provided.".to_string(),
-        ));
-    }
-
-    // Validate the plot ID
-    let plot_id = payload.plot_id.clone();
-    let plot_exists = PLOTS_STORAGE.with(|storage| {
-        storage.borrow().iter().any(|(_, plot)| plot.id == plot_id)
-    });
-    if !plot_exists {
-        return Err(Message::InvalidPayload(
-            "Plot not found: Ensure the plot ID is correct.".to_string(),
-        ));
-    }
-
-    let id = ID_COUNTER
-        .with(|counter| {
-            let current_value = *counter.borrow().get();
-            counter.borrow_mut().set(current_value + 1)
-        })
-        .expect("Cannot increment ID counter");
-
+fn create_activity(plot_id: String, description: String) -> Result<Message, Message> {
     let activity = Activity {
-        id: id.to_string(),
-        plot_id: payload.plot_id,
-        description: payload.description,
-        date: payload.date,
-        created_at: time().to_string(),
+        activity_id: get_new_id().to_string(),
+        plot_id,
+        description,
+        timestamp: current_timestamp(),
     };
-
-    ACTIVITIES_STORAGE.with(|storage| storage.borrow_mut().insert(id, activity.clone()));
-
-    Ok(activity)
+    let mut storage = ACTIVITIES_STORAGE.lock().unwrap();
+    storage.insert(activity.activity_id.clone(), activity);
+    Ok(Message::Success)
 }
 
 // Function to get all activities
 #[ic_cdk::query]
-fn get_all_activities() -> Result<Vec<Activity>, Message> {
-    ACTIVITIES_STORAGE.with(|storage| {
-        let records: Vec<Activity> = storage.borrow().iter().map(|(_, record)| record.clone()).collect();
-        if records.is_empty() {
-            Err(Message::NotFound("No activities found.".to_string()))
-        } else {
-            Ok(records)
+fn get_all_activities() -> Vec<Activity> {
+    let storage = ACTIVITIES_STORAGE.lock().unwrap();
+    storage.values().cloned().collect()
+}
+
+// Function to update an activity
+#[ic_cdk::update]
+fn update_activity(activity_id: String, plot_id: Option<String>, description: Option<String>, requester_id: String) -> Result<Message
+// Function to update an activity
+#[ic_cdk::update]
+fn update_activity(activity_id: String, plot_id: Option<String>, description: Option<String>, requester_id: String) -> Result<Message, Message> {
+    if !is_admin(&requester_id) {
+        return Err(Message::Error(Error::Unauthorized("Only admins can update activities.".to_string())));
+    }
+    let mut storage = ACTIVITIES_STORAGE.lock().unwrap();
+    let activity = storage.get_mut(&activity_id);
+    if let Some(activity) = activity {
+        if let Some(plot_id) = plot_id {
+            activity.plot_id = plot_id;
         }
-    })
+        if let Some(description) = description {
+            activity.description = description;
+        }
+        Ok(Message::Success)
+    } else {
+        Err(Message::Error(Error::NotFound("Activity not found".to_string())))
+    }
+}
+
+// Function to delete an activity
+#[ic_cdk::update]
+fn delete_activity(activity_id: String, requester_id: String) -> Result<Message, Message> {
+    if !is_admin(&requester_id) {
+        return Err(Message::Error(Error::Unauthorized("Only admins can delete activities.".to_string())));
+    }
+    let mut storage = ACTIVITIES_STORAGE.lock().unwrap();
+    if storage.remove(&activity_id).is_some() {
+        Ok(Message::Success)
+    } else {
+        Err(Message::Error(Error::NotFound("Activity not found".to_string())))
+    }
 }
 
 // Function to create a new resource
 #[ic_cdk::update]
-fn create_resource(payload: ResourcePayload) -> Result<Resource, Message> {
-    if payload.name.is_empty() || payload.quantity == 0 {
-        return Err(Message::InvalidPayload(
-            "Ensure 'name' and 'quantity' are provided.".to_string(),
-        ));
-    }
-
-    let id = ID_COUNTER
-        .with(|counter| {
-            let current_value = *counter.borrow().get();
-            counter.borrow_mut().set(current_value + 1)
-        })
-        .expect("Cannot increment ID counter");
-
+fn create_resource(name: String, quantity: u32) -> Result<Message, Message> {
     let resource = Resource {
-        id: id.to_string(),
-        name: payload.name,
-        quantity: payload.quantity,
-        available: payload.available,
-        created_at: time().to_string(),
+        resource_id: get_new_id().to_string(),
+        name,
+        quantity,
     };
-
-    RESOURCES_STORAGE.with(|storage| storage.borrow_mut().insert(id, resource.clone()));
-
-    Ok(resource)
+    let mut storage = RESOURCES_STORAGE.lock().unwrap();
+    storage.insert(resource.resource_id.clone(), resource);
+    Ok(Message::Success)
 }
 
 // Function to get all resources
 #[ic_cdk::query]
-fn get_all_resources() -> Result<Vec<Resource>, Message> {
-    RESOURCES_STORAGE.with(|storage| {
-        let records: Vec<Resource> = storage.borrow().iter().map(|(_, record)| record.clone()).collect();
-        if records.is_empty() {
-            Err(Message::NotFound("No resources found.".to_string()))
-        } else {
-            Ok(records)
+fn get_all_resources() -> Vec<Resource> {
+    let storage = RESOURCES_STORAGE.lock().unwrap();
+    storage.values().cloned().collect()
+}
+
+// Function to update a resource
+#[ic_cdk::update]
+fn update_resource(resource_id: String, name: Option<String>, quantity: Option<u32>, requester_id: String) -> Result<Message, Message> {
+    if !is_admin(&requester_id) {
+        return Err(Message::Error(Error::Unauthorized("Only admins can update resources.".to_string())));
+    }
+    let mut storage = RESOURCES_STORAGE.lock().unwrap();
+    let resource = storage.get_mut(&resource_id);
+    if let Some(resource) = resource {
+        if let Some(name) = name {
+            resource.name = name;
         }
-    })
+        if let Some(quantity) = quantity {
+            resource.quantity = quantity;
+        }
+        Ok(Message::Success)
+    } else {
+        Err(Message::Error(Error::NotFound("Resource not found".to_string())))
+    }
+}
+
+// Function to delete a resource
+#[ic_cdk::update]
+fn delete_resource(resource_id: String, requester_id: String) -> Result<Message, Message> {
+    if !is_admin(&requester_id) {
+        return Err(Message::Error(Error::Unauthorized("Only admins can delete resources.".to_string())));
+    }
+    let mut storage = RESOURCES_STORAGE.lock().unwrap();
+    if storage.remove(&resource_id).is_some() {
+        Ok(Message::Success)
+    } else {
+        Err(Message::Error(Error::NotFound("Resource not found".to_string())))
+    }
 }
 
 // Function to create a new event
 #[ic_cdk::update]
-fn create_event(payload: EventPayload) -> Result<Event, Message> {
-    if payload.title.is_empty() || payload.description.is_empty() || payload.date.is_empty() || payload.location.is_empty() {
-        return Err(Message::InvalidPayload(
-            "Ensure 'title', 'description', 'date', and 'location' are provided.".to_string(),
-        ));
-    }
-
-    let id = ID_COUNTER
-        .with(|counter| {
-            let current_value = *counter.borrow().get();
-            counter.borrow_mut().set(current_value + 1)
-        })
-        .expect("Cannot increment ID counter");
-
+fn create_event(name: String, date: String, location: String) -> Result<Message, Message> {
     let event = Event {
-        id: id.to_string(),
-        title: payload.title,
-        description: payload.description,
-        date: payload.date,
-        location: payload.location,
-        created_at: time().to_string(),
+        event_id: get_new_id().to_string(),
+        name,
+        date,
+        location,
     };
-
-    EVENTS_STORAGE.with(|storage| storage.borrow_mut().insert(id, event.clone()));
-
-    Ok(event)
+    let mut storage = EVENTS_STORAGE.lock().unwrap();
+    storage.insert(event.event_id.clone(), event);
+    Ok(Message::Success)
 }
 
 // Function to get all events
 #[ic_cdk::query]
-fn get_all_events() -> Result<Vec<Event>, Message> {
-    EVENTS_STORAGE.with(|storage| {
-        let records: Vec<Event> = storage.borrow().iter().map(|(_, record)| record.clone()).collect();
-        if records.is_empty() {
-            Err(Message::NotFound("No events found.".to_string()))
-        } else {
-            Ok(records)
+fn get_all_events() -> Vec<Event> {
+    let storage = EVENTS_STORAGE.lock().unwrap();
+    storage.values().cloned().collect()
+}
+
+// Function to update an event
+#[ic_cdk::update]
+fn update_event(event_id: String, name: Option<String>, date: Option<String>, location: Option<String>, requester_id: String) -> Result<Message, Message> {
+    if !is_admin(&requester_id) {
+        return Err(Message::Error(Error::Unauthorized("Only admins can update events.".to_string())));
+    }
+    let mut storage = EVENTS_STORAGE.lock().unwrap();
+    let event = storage.get_mut(&event_id);
+    if let Some(event) = event {
+        if let Some(name) = name {
+            event.name = name;
         }
-    })
+        if let Some(date) = date {
+            event.date = date;
+        }
+        if let Some(location) = location {
+            event.location = location;
+        }
+        Ok(Message::Success)
+    } else {
+        Err(Message::Error(Error::NotFound("Event not found".to_string())))
+    }
 }
 
-// Error types
-#[derive(candid::CandidType, Deserialize, Serialize)]
-enum Error {
-    NotFound { msg: String },
+// Function to delete an event
+#[ic_cdk::update]
+fn delete_event(event_id: String, requester_id: String) -> Result<Message, Message> {
+    if !is_admin(&requester_id) {
+        return Err(Message::Error(Error::Unauthorized("Only admins can delete events.".to_string())));
+    }
+    let mut storage = EVENTS_STORAGE.lock().unwrap();
+    if storage.remove(&event_id).is_some() {
+        Ok(Message::Success)
+    } else {
+        Err(Message::Error(Error::NotFound("Event not found".to_string())))
+    }
 }
 
-// need this to generate candid
+// Export the Candid interface for this canister
+#[export_candid]
+fn export_candid() -> String {
+    ic_cdk::export::candid::export_service!();
+    __export_service()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_user() {
+        let result = create_user("1".to_string(), "test@example.com".to_string(), "+1234567890".to_string(), Role::User);
+        assert!(matches!(result, Ok(Message::Success)));
+    }
+
+    #[test]
+    fn test_invalid_email() {
+        let result = create_user("2".to_string(), "invalid-email".to_string(), "+1234567890".to_string(), Role::User);
+        assert!(matches!(result, Err(Message::Error(Error::InvalidPayload(_)))));
+    }
+
+    #[test]
+    fn test_invalid_phone() {
+        let result = create_user("3".to_string(), "test@example.com".to_string(), "invalid-phone".to_string(), Role::User);
+        assert!(matches!(result, Err(Message::Error(Error::InvalidPayload(_)))));
+    }
+}
+
 ic_cdk::export_candid!();
